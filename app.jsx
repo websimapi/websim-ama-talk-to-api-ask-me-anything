@@ -16,6 +16,7 @@ function AMAApp() {
     };
     loadUsers();
   }, []);
+  const currentUserId = currentUser?.id || "";
   const { data: questions, loading } = useQuery(
     room.query(`WITH vote_counts AS (
       SELECT 
@@ -26,12 +27,12 @@ function AMAApp() {
         q.user_id as author_id,
         SUM(CASE WHEN v.vote_type = 'up' THEN 1 ELSE 0 END) as upvotes,
         SUM(CASE WHEN v.vote_type = 'down' THEN 1 ELSE 0 END) as downvotes,
-        MAX(CASE WHEN v.user_id = ? THEN v.vote_type ELSE NULL END) as user_vote
+        MAX(CASE WHEN v.user_id = $1 THEN v.vote_type ELSE NULL END) as user_vote
       FROM public.questions q
       LEFT JOIN public.votes v ON q.id = v.question_id
       GROUP BY q.id, q.question, q.username, q.created_at, q.user_id
     )
-    SELECT * FROM vote_counts ORDER BY (upvotes - downvotes) DESC, created_at DESC`)
+    SELECT * FROM vote_counts ORDER BY (upvotes - downvotes) DESC, created_at DESC`, [currentUserId])
   );
   const { data: answers } = useQuery(
     room.query(`SELECT a.*, u.username as answer_author
@@ -43,9 +44,7 @@ function AMAApp() {
     e.preventDefault();
     if (!newQuestion.trim()) return;
     await room.collection("questions").create({
-      question: newQuestion,
-      author_username: currentUser?.username || "anonymous",
-      author_id: currentUser?.id || "anonymous"
+      question: newQuestion
     });
     setNewQuestion("");
   };
@@ -68,19 +67,17 @@ function AMAApp() {
     }
     await room.collection("answers").create({
       question_id: questionId,
-      answer: answerText,
-      user_id: currentUser.id,
-      username: currentUser.username
+      answer: answerText
     });
   };
   if (loading && !questions) {
     return /* @__PURE__ */ jsxDEV("div", { className: "min-h-screen bg-gray-900 text-white flex items-center justify-center", children: /* @__PURE__ */ jsxDEV("div", { className: "text-xl", children: "Loading questions..." }, void 0, false, {
       fileName: "<stdin>",
-      lineNumber: 92,
+      lineNumber: 91,
       columnNumber: 7
     }, this) }, void 0, false, {
       fileName: "<stdin>",
-      lineNumber: 91,
+      lineNumber: 90,
       columnNumber: 12
     }, this);
   }
@@ -91,23 +88,23 @@ function AMAApp() {
         creator?.username || "api"
       ] }, void 0, true, {
         fileName: "<stdin>",
-        lineNumber: 100,
+        lineNumber: 99,
         columnNumber: 11
       }, this),
       /* @__PURE__ */ jsxDEV("p", { className: "text-gray-400 text-lg", children: "Ask me anything! I'll do my best to answer." }, void 0, false, {
         fileName: "<stdin>",
-        lineNumber: 101,
+        lineNumber: 100,
         columnNumber: 11
       }, this)
     ] }, void 0, true, {
       fileName: "<stdin>",
-      lineNumber: 99,
+      lineNumber: 98,
       columnNumber: 9
     }, this),
     /* @__PURE__ */ jsxDEV("div", { className: "mb-8", children: /* @__PURE__ */ jsxDEV("form", { onSubmit: handleQuestionSubmit, className: "mb-6", children: /* @__PURE__ */ jsxDEV("div", { className: "bg-gray-800 rounded-lg p-6", children: [
       /* @__PURE__ */ jsxDEV("h3", { className: "text-xl font-semibold mb-4", children: "Ask a Question" }, void 0, false, {
         fileName: "<stdin>",
-        lineNumber: 107,
+        lineNumber: 106,
         columnNumber: 15
       }, this),
       /* @__PURE__ */ jsxDEV(
@@ -123,7 +120,7 @@ function AMAApp() {
         false,
         {
           fileName: "<stdin>",
-          lineNumber: 108,
+          lineNumber: 107,
           columnNumber: 15
         },
         this
@@ -139,28 +136,28 @@ function AMAApp() {
         false,
         {
           fileName: "<stdin>",
-          lineNumber: 115,
+          lineNumber: 114,
           columnNumber: 15
         },
         this
       )
     ] }, void 0, true, {
       fileName: "<stdin>",
-      lineNumber: 106,
+      lineNumber: 105,
       columnNumber: 13
     }, this) }, void 0, false, {
       fileName: "<stdin>",
-      lineNumber: 105,
+      lineNumber: 104,
       columnNumber: 11
     }, this) }, void 0, false, {
       fileName: "<stdin>",
-      lineNumber: 104,
+      lineNumber: 103,
       columnNumber: 9
     }, this),
     /* @__PURE__ */ jsxDEV("div", { className: "space-y-6", children: [
       /* @__PURE__ */ jsxDEV("h2", { className: "text-2xl font-bold mb-4", children: "Questions" }, void 0, false, {
         fileName: "<stdin>",
-        lineNumber: 126,
+        lineNumber: 125,
         columnNumber: 11
       }, this),
       questions?.map(({ id, question, author_username, created_at, upvotes = 0, downvotes = 0, user_vote = null }) => {
@@ -171,7 +168,7 @@ function AMAApp() {
             /* @__PURE__ */ jsxDEV("div", { className: "flex-1", children: [
               /* @__PURE__ */ jsxDEV("p", { className: "text-gray-100 text-lg mb-2", children: question }, void 0, false, {
                 fileName: "<stdin>",
-                lineNumber: 135,
+                lineNumber: 134,
                 columnNumber: 21
               }, this),
               /* @__PURE__ */ jsxDEV("p", { className: "text-sm text-gray-400", children: [
@@ -181,19 +178,19 @@ function AMAApp() {
                   author_username
                 ] }, void 0, true, {
                   fileName: "<stdin>",
-                  lineNumber: 137,
+                  lineNumber: 136,
                   columnNumber: 32
                 }, this),
                 " \u2022 ",
                 new Date(created_at).toLocaleDateString()
               ] }, void 0, true, {
                 fileName: "<stdin>",
-                lineNumber: 136,
+                lineNumber: 135,
                 columnNumber: 21
               }, this)
             ] }, void 0, true, {
               fileName: "<stdin>",
-              lineNumber: 134,
+              lineNumber: 133,
               columnNumber: 19
             }, this),
             /* @__PURE__ */ jsxDEV("div", { className: "flex items-center space-x-2 ml-4", children: [
@@ -212,7 +209,7 @@ function AMAApp() {
                 true,
                 {
                   fileName: "<stdin>",
-                  lineNumber: 141,
+                  lineNumber: 140,
                   columnNumber: 21
                 },
                 this
@@ -232,24 +229,24 @@ function AMAApp() {
                 true,
                 {
                   fileName: "<stdin>",
-                  lineNumber: 148,
+                  lineNumber: 147,
                   columnNumber: 21
                 },
                 this
               ),
               /* @__PURE__ */ jsxDEV("span", { className: "ml-2 font-bold text-lg", children: score }, void 0, false, {
                 fileName: "<stdin>",
-                lineNumber: 155,
+                lineNumber: 154,
                 columnNumber: 21
               }, this)
             ] }, void 0, true, {
               fileName: "<stdin>",
-              lineNumber: 140,
+              lineNumber: 139,
               columnNumber: 19
             }, this)
           ] }, void 0, true, {
             fileName: "<stdin>",
-            lineNumber: 133,
+            lineNumber: 132,
             columnNumber: 17
           }, this),
           questionAnswers.length > 0 ? /* @__PURE__ */ jsxDEV("div", { className: "border-t border-gray-700 pt-4", children: [
@@ -259,13 +256,13 @@ function AMAApp() {
               ":"
             ] }, void 0, true, {
               fileName: "<stdin>",
-              lineNumber: 161,
+              lineNumber: 160,
               columnNumber: 21
             }, this),
             questionAnswers.map((answer) => /* @__PURE__ */ jsxDEV("div", { className: "bg-gray-700 p-4 rounded-md mb-2", children: [
               /* @__PURE__ */ jsxDEV("p", { className: "text-gray-200", children: answer.answer }, void 0, false, {
                 fileName: "<stdin>",
-                lineNumber: 164,
+                lineNumber: 163,
                 columnNumber: 25
               }, this),
               /* @__PURE__ */ jsxDEV("p", { className: "text-xs text-gray-400 mt-2", children: [
@@ -273,17 +270,17 @@ function AMAApp() {
                 new Date(answer.created_at).toLocaleDateString()
               ] }, void 0, true, {
                 fileName: "<stdin>",
-                lineNumber: 165,
+                lineNumber: 164,
                 columnNumber: 25
               }, this)
             ] }, answer.id, true, {
               fileName: "<stdin>",
-              lineNumber: 163,
+              lineNumber: 162,
               columnNumber: 23
             }, this))
           ] }, void 0, true, {
             fileName: "<stdin>",
-            lineNumber: 160,
+            lineNumber: 159,
             columnNumber: 19
           }, this) : creator && creator.username === currentUser?.username && /* @__PURE__ */ jsxDEV("div", { className: "border-t border-gray-700 pt-4", children: /* @__PURE__ */ jsxDEV(
             AnswerForm,
@@ -295,42 +292,42 @@ function AMAApp() {
             false,
             {
               fileName: "<stdin>",
-              lineNumber: 173,
+              lineNumber: 172,
               columnNumber: 21
             },
             this
           ) }, void 0, false, {
             fileName: "<stdin>",
-            lineNumber: 172,
+            lineNumber: 171,
             columnNumber: 19
           }, this)
         ] }, id, true, {
           fileName: "<stdin>",
-          lineNumber: 132,
+          lineNumber: 131,
           columnNumber: 15
         }, this);
       }),
       questions?.length === 0 && /* @__PURE__ */ jsxDEV("div", { className: "text-center py-12", children: /* @__PURE__ */ jsxDEV("p", { className: "text-gray-400 text-lg", children: "No questions yet. Be the first to ask!" }, void 0, false, {
         fileName: "<stdin>",
-        lineNumber: 185,
+        lineNumber: 184,
         columnNumber: 15
       }, this) }, void 0, false, {
         fileName: "<stdin>",
-        lineNumber: 184,
+        lineNumber: 183,
         columnNumber: 13
       }, this)
     ] }, void 0, true, {
       fileName: "<stdin>",
-      lineNumber: 125,
+      lineNumber: 124,
       columnNumber: 9
     }, this)
   ] }, void 0, true, {
     fileName: "<stdin>",
-    lineNumber: 98,
+    lineNumber: 97,
     columnNumber: 7
   }, this) }, void 0, false, {
     fileName: "<stdin>",
-    lineNumber: 97,
+    lineNumber: 96,
     columnNumber: 5
   }, this);
 }
@@ -357,7 +354,7 @@ function AnswerForm({ onSubmit, isCreator }) {
       false,
       {
         fileName: "<stdin>",
-        lineNumber: 209,
+        lineNumber: 208,
         columnNumber: 7
       },
       this
@@ -373,20 +370,20 @@ function AnswerForm({ onSubmit, isCreator }) {
       false,
       {
         fileName: "<stdin>",
-        lineNumber: 216,
+        lineNumber: 215,
         columnNumber: 7
       },
       this
     )
   ] }, void 0, true, {
     fileName: "<stdin>",
-    lineNumber: 208,
+    lineNumber: 207,
     columnNumber: 5
   }, this);
 }
 const root = createRoot(document.getElementById("root"));
 root.render(/* @__PURE__ */ jsxDEV(AMAApp, {}, void 0, false, {
   fileName: "<stdin>",
-  lineNumber: 227,
+  lineNumber: 226,
   columnNumber: 13
 }));
