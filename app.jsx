@@ -1,1 +1,385 @@
-{"content":"import React, { useState, useEffect } from 'react';\nimport { createRoot } from 'react-dom/client';\nimport { WebsimSocket, useQuery } from '@websim/use-query';\n\nconst room = new WebsimSocket();\n\nfunction AMAApp() {\n  const [newQuestion, setNewQuestion] = useState('');\n  const [creator, setCreator] = useState(null);\n  const [currentUser, setCurrentUser] = useState(null);\n  \n  // Get creator and current user info\n  useEffect(() => {\n    const loadUsers = async () => {\n      const creatorData = await window.websim.getCreator();\n      const currentUserData = await window.websim.getCurrentUser();\n      setCreator(creatorData);\n      setCurrentUser(currentUserData);\n    };\n    loadUsers();\n  }, []);\n\n  // Fetch questions with votes\n  const { data: questions, loading } = useQuery(\n    room.query(`WITH vote_counts AS (\n      SELECT \n        q.id,\n        q.question,\n        q.username as author_username,\n        q.created_at,\n        q.user_id as author_id,\n        SUM(CASE WHEN v.vote_type = 'up' THEN 1 ELSE 0 END) as upvotes,\n        SUM(CASE WHEN v.vote_type = 'down' THEN 1 ELSE 0 END) as downvotes,\n        MAX(CASE WHEN v.user_id = $1 THEN v.vote_type ELSE NULL END) as user_vote\n      FROM public.questions q\n      LEFT JOIN public.votes v ON q.id = v.question_id\n      GROUP BY q.id, q.question, q.username, q.created_at, q.user_id\n    )\n    SELECT * FROM vote_counts ORDER BY (upvotes - downvotes) DESC, created_at DESC`, \n    [currentUser?.id || '']\n  );\n\n  // Fetch answers\n  const { data: answers } = useQuery(\n    room.query(`SELECT a.*, u.username as answer_author\n                FROM public.answers a\n                JOIN public.user u ON a.user_id = u.id\n                ORDER BY a.created_at ASC`)\n  );\n\n  const handleQuestionSubmit = async (e) => {\n    e.preventDefault();\n    if (!newQuestion.trim()) return;\n\n    await room.collection('questions').create({\n      question: newQuestion,\n      author_username: currentUser?.username || 'anonymous',\n      author_id: currentUser?.id || 'anonymous',\n    });\n    setNewQuestion('');\n  };\n\n  const handleVote = async (questionId, voteType) => {\n    if (!currentUser) {\n      alert('Please sign in to vote');\n      return;\n    }\n\n    await room.collection('votes').upsert({\n      id: `${currentUser.id}-${questionId}`,\n      question_id: questionId,\n      user_id: currentUser.id,\n      vote_type: voteType,\n    });\n  };\n\n  const handleAnswer = async (questionId, answerText) => {\n    if (!creator || !currentUser || currentUser.id !== creator.id) {\n      alert('Only the creator can answer questions');\n      return;\n    }\n\n    await room.collection('answers').create({\n      question_id: questionId,\n      answer: answerText,\n      user_id: currentUser.id,\n      username: currentUser.username,\n    });\n  };\n\n  if (loading && !questions) {\n    return <div className=\"min-h-screen bg-gray-900 text-white flex items-center justify-center\">\n      <div className=\"text-xl\">Loading questions...</div>\n    </div>;\n  }\n\n  return (\n    <div className=\"min-h-screen bg-gray-900 text-white\">\n      <div className=\"max-w-4xl mx-auto px-4 py-8\">\n        <header className=\"text-center mb-12\">\n          <h1 className=\"text-4xl font-bold mb-2\">[AMA] Talk to @{creator?.username || 'api'}</h1>\n          <p className=\"text-gray-400 text-lg\">Ask me anything! I'll do my best to answer.</p>\n        </header>\n\n        <div className=\"mb-8\">\n          <form onSubmit={handleQuestionSubmit} className=\"mb-6\">\n            <div className=\"bg-gray-800 rounded-lg p-6\">\n              <h3 className=\"text-xl font-semibold mb-4\">Ask a Question</h3>\n              <textarea\n                value={newQuestion}\n                onChange={(e) => setNewQuestion(e.target.value)}\n                placeholder=\"What would you like to ask?\"\n                className=\"w-full px-4 py-3 bg-gray-700 rounded-md text-white placeholder-gray-400 resize-none\"\n                rows=\"3\"\n              />\n              <button\n                type=\"submit\"\n                className=\"mt-4 px-6 py-2 bg-blue-600 hover:bg-blue-700 rounded-md font-medium transition duration-200\"\n              >\n                Submit Question\n              </button>\n            </div>\n          </form>\n        </div>\n\n        <div className=\"space-y-6\">\n          <h2 className=\"text-2xl font-bold mb-4\">Questions</h2>\n          {questions?.map(({ id, question, author_username, created_at, upvotes = 0, downvotes = 0, user_vote = null }) => {\n            const score = upvotes - downvotes;\n            const questionAnswers = answers?.filter(a => a.question_id === id) || [];\n\n            return (\n              <div key={id} className=\"bg-gray-800 rounded-lg p-6\">\n                <div className=\"flex justify-between items-start mb-4\">\n                  <div className=\"flex-1\">\n                    <p className=\"text-gray-100 text-lg mb-2\">{question}</p>\n                    <p className=\"text-sm text-gray-400\">\n                      asked by <span className=\"font-medium\">@{author_username}</span> • {new Date(created_at).toLocaleDateString()}\n                    </p>\n                  </div>\n                  <div className=\"flex items-center space-x-2 ml-4\">\n                    <button\n                      onClick={() => handleVote(id, 'up')}\n                      className={`p-2 rounded ${user_vote === 'up' ? 'bg-green-700' : 'bg-gray-700 hover:bg-gray-600'}`}\n                      disabled={!currentUser}\n                    >\n                      ↑ {upvotes || 0}\n                    </button>\n                    <button\n                      onClick={() => handleVote(id, 'down')}\n                      className={`p-2 rounded ${user_vote === 'down' ? 'bg-red-700' : 'bg-gray-700 hover:bg-gray-600'}`}\n                      disabled={!currentUser}\n                    >\n                      ↓ {downvotes || 0}\n                    </button>\n                    <span className=\"ml-2 font-bold text-lg\">{score}</span>\n                  </div>\n                </div>\n\n                {questionAnswers.length > 0 ? (\n                  <div className=\"border-t border-gray-700 pt-4\">\n                    <h4 className=\"text-md font-semibold mb-3\">Answer@{creator?.username}:</h4>\n                    {questionAnswers.map(answer => (\n                      <div key={answer.id} className=\"bg-gray-700 p-4 rounded-md mb-2\">\n                        <p className=\"text-gray-200\">{answer.answer}</p>\n                        <p className=\"text-xs text-gray-400 mt-2\">\n                          answered on {new Date(answer.created_at).toLocaleDateString()}\n                        </p>\n                      </div>\n                    ))}\n                  </div>\n                ) : creator && creator.username === currentUser?.username && (\n                  <div className=\"border-t border-gray-700 pt-4\">\n                    <AnswerForm \n                      onSubmit={(answer) => handleAnswer(id, answer)} \n                      isCreator={true}\n                    />\n                  </div>\n                )}\n              </div>\n            );\n          })}\n\n          {questions?.length === 0 && (\n            <div className=\"text-center py-12\">\n              <p className=\"text-gray-400 text-lg\">No questions yet. Be the first to ask!</p>\n            </div>\n          )}\n        </div>\n      </div>\n    </div>\n  );\n}\n\nfunction AnswerForm({ onSubmit, isCreator }) {\n  const [answer, setAnswer] = useState('');\n  \n  if (!isCreator) return null;\n\n  const handleSubmit = (e) => {\n    e.preventDefault();\n    if (!answer.trim()) return;\n    \n    onSubmit(answer);\n    setAnswer('');\n  };\n\n  return (\n    <form onSubmit={handleSubmit} className=\"mt-4\">\n      <textarea\n        value={answer}\n        onChange={(e) => setAnswer(e.target.value)}\n        placeholder=\"Write your answer...\"\n        className=\"w-full px-3 py-2 bg-gray-600 rounded-md text-white placeholder-gray-400 resize-none\"\n        rows=\"3\"\n      />\n      <button\n        type=\"submit\"\n        className=\"mt-2 px-4 py-2 bg-green-600 hover:bg-green-700 rounded-md text-sm font-medium transition duration-200\"\n      >\n        Post Answer\n      </button>\n    </form>\n  );\n}\n\nconst root = createRoot(document.getElementById('root'));\nroot.render(<AMAApp />);"}
+import { jsxDEV } from "react/jsx-dev-runtime";
+import React, { useState, useEffect } from "react";
+import { createRoot } from "react-dom/client";
+import { WebsimSocket, useQuery } from "@websim/use-query";
+const room = new WebsimSocket();
+function AMAApp() {
+  const [newQuestion, setNewQuestion] = useState("");
+  const [newAnswer, setNewAnswer] = useState({});
+  const [creator, setCreator] = useState(null);
+  const [currentUser, setCurrentUser] = useState(null);
+  useEffect(() => {
+    const loadUsers = async () => {
+      const creatorData = await window.websim.getCreator();
+      const currentUserData = await window.websim.getCurrentUser();
+      setCreator(creatorData);
+      setCurrentUser(currentUserData);
+    };
+    loadUsers();
+  }, []);
+  const { data: questions, loading: loadingQuestions } = useQuery(
+    room.collection("questions").getList()
+  );
+  const { data: votes, loading: loadingVotes } = useQuery(
+    room.collection("votes").getList()
+  );
+  const { data: answers, loading: loadingAnswers } = useQuery(
+    room.collection("answers").getList()
+  );
+  const handleQuestionSubmit = async (e) => {
+    e.preventDefault();
+    if (!newQuestion.trim()) return;
+    await room.collection("questions").create({
+      question: newQuestion,
+      author_username: currentUser?.username || "anonymous",
+      author_id: currentUser?.id || "anonymous"
+    });
+    setNewQuestion("");
+  };
+  const handleVote = async (questionId, voteType) => {
+    if (!currentUser) {
+      alert("Please sign in to vote");
+      return;
+    }
+    await room.collection("votes").upsert({
+      id: `${currentUser.id}-${questionId}`,
+      question_id: questionId,
+      user_id: currentUser.id,
+      vote_type: voteType
+    });
+  };
+  const handleAnswer = async (questionId) => {
+    if (!creator || !currentUser || currentUser.id !== creator.id) {
+      alert("Only the creator can answer questions");
+      return;
+    }
+    const answerText = newAnswer[questionId];
+    if (!answerText?.trim()) return;
+    await room.collection("answers").create({
+      question_id: questionId,
+      answer: answerText,
+      user_id: currentUser.id,
+      username: currentUser.username
+    });
+    setNewAnswer((prev) => ({ ...prev, [questionId]: "" }));
+  };
+  if (loadingQuestions || loadingVotes || loadingAnswers) {
+    return /* @__PURE__ */ jsxDEV("div", { className: "min-h-screen bg-gray-900 text-white flex items-center justify-center", children: /* @__PURE__ */ jsxDEV("div", { className: "text-xl", children: "Loading questions..." }, void 0, false, {
+      fileName: "<stdin>",
+      lineNumber: 86,
+      columnNumber: 7
+    }, this) }, void 0, false, {
+      fileName: "<stdin>",
+      lineNumber: 85,
+      columnNumber: 12
+    }, this);
+  }
+  const getQuestionData = () => {
+    if (!questions || !votes) return {};
+    const voteCounts2 = {};
+    votes.forEach((vote) => {
+      if (!voteCounts2[vote.question_id]) {
+        voteCounts2[vote.question_id] = { upvotes: 0, downvotes: 0 };
+      }
+      if (vote.vote_type === "up") {
+        voteCounts2[vote.question_id].upvotes++;
+      } else {
+        voteCounts2[vote.question_id].downvotes++;
+      }
+    });
+    return voteCounts2;
+  };
+  const voteCounts = getQuestionData();
+  const getUserVote = (questionId) => {
+    if (!currentUser || !votes) return null;
+    const vote = votes.find((v) => v.question_id === questionId && v.user_id === currentUser.id);
+    return vote?.vote_type;
+  };
+  const sortedQuestions = questions?.slice().sort((a, b) => {
+    const scoreA = (voteCounts[a.id]?.upvotes || 0) - (voteCounts[a.id]?.downvotes || 0);
+    const scoreB = (voteCounts[b.id]?.upvotes || 0) - (voteCounts[b.id]?.downvotes || 0);
+    return scoreB - scoreA;
+  }) || [];
+  return /* @__PURE__ */ jsxDEV("div", { className: "min-h-screen bg-gray-900 text-white", children: /* @__PURE__ */ jsxDEV("div", { className: "max-w-4xl mx-auto px-4 py-8", children: [
+    /* @__PURE__ */ jsxDEV("header", { className: "text-center mb-12", children: [
+      /* @__PURE__ */ jsxDEV("h1", { className: "text-4xl font-bold mb-2", children: [
+        "[AMA] Talk to @",
+        creator?.username || "api"
+      ] }, void 0, true, {
+        fileName: "<stdin>",
+        lineNumber: 128,
+        columnNumber: 11
+      }, this),
+      /* @__PURE__ */ jsxDEV("p", { className: "text-gray-400 text-lg", children: "Ask me anything! I'll do my best to answer." }, void 0, false, {
+        fileName: "<stdin>",
+        lineNumber: 129,
+        columnNumber: 11
+      }, this)
+    ] }, void 0, true, {
+      fileName: "<stdin>",
+      lineNumber: 127,
+      columnNumber: 9
+    }, this),
+    /* @__PURE__ */ jsxDEV("div", { className: "mb-8", children: /* @__PURE__ */ jsxDEV("form", { onSubmit: handleQuestionSubmit, className: "mb-6", children: /* @__PURE__ */ jsxDEV("div", { className: "bg-gray-800 rounded-lg p-6", children: [
+      /* @__PURE__ */ jsxDEV("h3", { className: "text-xl font-semibold mb-4", children: "Ask a Question" }, void 0, false, {
+        fileName: "<stdin>",
+        lineNumber: 135,
+        columnNumber: 15
+      }, this),
+      /* @__PURE__ */ jsxDEV(
+        "textarea",
+        {
+          value: newQuestion,
+          onChange: (e) => setNewQuestion(e.target.value),
+          placeholder: "What would you like to ask?",
+          className: "w-full px-4 py-3 bg-gray-700 rounded-md text-white placeholder-gray-400 resize-none",
+          rows: "3"
+        },
+        void 0,
+        false,
+        {
+          fileName: "<stdin>",
+          lineNumber: 136,
+          columnNumber: 15
+        },
+        this
+      ),
+      /* @__PURE__ */ jsxDEV(
+        "button",
+        {
+          type: "submit",
+          className: "mt-4 px-6 py-2 bg-blue-600 hover:bg-blue-700 rounded-md font-medium transition duration-200",
+          children: "Submit Question"
+        },
+        void 0,
+        false,
+        {
+          fileName: "<stdin>",
+          lineNumber: 143,
+          columnNumber: 15
+        },
+        this
+      )
+    ] }, void 0, true, {
+      fileName: "<stdin>",
+      lineNumber: 134,
+      columnNumber: 13
+    }, this) }, void 0, false, {
+      fileName: "<stdin>",
+      lineNumber: 133,
+      columnNumber: 11
+    }, this) }, void 0, false, {
+      fileName: "<stdin>",
+      lineNumber: 132,
+      columnNumber: 9
+    }, this),
+    /* @__PURE__ */ jsxDEV("div", { className: "space-y-6", children: [
+      /* @__PURE__ */ jsxDEV("h2", { className: "text-2xl font-bold mb-4", children: "Questions" }, void 0, false, {
+        fileName: "<stdin>",
+        lineNumber: 154,
+        columnNumber: 11
+      }, this),
+      sortedQuestions.map((question) => {
+        const vc = voteCounts[question.id] || { upvotes: 0, downvotes: 0 };
+        const score = vc.upvotes - vc.downvotes;
+        const userVote = getUserVote(question.id);
+        const questionAnswers = answers?.filter((a) => a.question_id === question.id) || [];
+        return /* @__PURE__ */ jsxDEV("div", { className: "bg-gray-800 rounded-lg p-6", children: [
+          /* @__PURE__ */ jsxDEV("div", { className: "flex justify-between items-start mb-4", children: [
+            /* @__PURE__ */ jsxDEV("div", { className: "flex-1", children: [
+              /* @__PURE__ */ jsxDEV("p", { className: "text-gray-100 text-lg mb-2", children: question.question }, void 0, false, {
+                fileName: "<stdin>",
+                lineNumber: 165,
+                columnNumber: 21
+              }, this),
+              /* @__PURE__ */ jsxDEV("p", { className: "text-sm text-gray-400", children: [
+                "asked by ",
+                /* @__PURE__ */ jsxDEV("span", { className: "font-medium", children: [
+                  "@",
+                  question.author_username || "anonymous"
+                ] }, void 0, true, {
+                  fileName: "<stdin>",
+                  lineNumber: 167,
+                  columnNumber: 32
+                }, this),
+                " \u2022 ",
+                new Date(question.created_at).toLocaleDateString()
+              ] }, void 0, true, {
+                fileName: "<stdin>",
+                lineNumber: 166,
+                columnNumber: 21
+              }, this)
+            ] }, void 0, true, {
+              fileName: "<stdin>",
+              lineNumber: 164,
+              columnNumber: 19
+            }, this),
+            /* @__PURE__ */ jsxDEV("div", { className: "flex items-center space-x-2 ml-4", children: [
+              /* @__PURE__ */ jsxDEV(
+                "button",
+                {
+                  onClick: () => handleVote(question.id, "up"),
+                  className: `p-2 rounded ${userVote === "up" ? "bg-green-700" : "bg-gray-700 hover:bg-gray-600"}`,
+                  disabled: !currentUser,
+                  children: [
+                    "\u2191 ",
+                    vc.upvotes || 0
+                  ]
+                },
+                void 0,
+                true,
+                {
+                  fileName: "<stdin>",
+                  lineNumber: 171,
+                  columnNumber: 21
+                },
+                this
+              ),
+              /* @__PURE__ */ jsxDEV(
+                "button",
+                {
+                  onClick: () => handleVote(question.id, "down"),
+                  className: `p-2 rounded ${userVote === "down" ? "bg-red-700" : "bg-gray-700 hover:bg-gray-600"}`,
+                  disabled: !currentUser,
+                  children: [
+                    "\u2193 ",
+                    vc.downvotes || 0
+                  ]
+                },
+                void 0,
+                true,
+                {
+                  fileName: "<stdin>",
+                  lineNumber: 178,
+                  columnNumber: 21
+                },
+                this
+              ),
+              /* @__PURE__ */ jsxDEV("span", { className: "ml-2 font-bold text-lg", children: score }, void 0, false, {
+                fileName: "<stdin>",
+                lineNumber: 185,
+                columnNumber: 21
+              }, this)
+            ] }, void 0, true, {
+              fileName: "<stdin>",
+              lineNumber: 170,
+              columnNumber: 19
+            }, this)
+          ] }, void 0, true, {
+            fileName: "<stdin>",
+            lineNumber: 163,
+            columnNumber: 17
+          }, this),
+          questionAnswers.length > 0 ? /* @__PURE__ */ jsxDEV("div", { className: "border-t border-gray-700 pt-4", children: [
+            /* @__PURE__ */ jsxDEV("h4", { className: "text-md font-semibold mb-3", children: [
+              "Answer from @",
+              creator?.username,
+              ":"
+            ] }, void 0, true, {
+              fileName: "<stdin>",
+              lineNumber: 191,
+              columnNumber: 21
+            }, this),
+            questionAnswers.map((answer) => /* @__PURE__ */ jsxDEV("div", { className: "bg-gray-700 p-4 rounded-md mb-2", children: [
+              /* @__PURE__ */ jsxDEV("p", { className: "text-gray-200", children: answer.answer }, void 0, false, {
+                fileName: "<stdin>",
+                lineNumber: 194,
+                columnNumber: 25
+              }, this),
+              /* @__PURE__ */ jsxDEV("p", { className: "text-xs text-gray-400 mt-2", children: [
+                "answered on ",
+                new Date(answer.created_at).toLocaleDateString()
+              ] }, void 0, true, {
+                fileName: "<stdin>",
+                lineNumber: 195,
+                columnNumber: 25
+              }, this)
+            ] }, answer.id, true, {
+              fileName: "<stdin>",
+              lineNumber: 193,
+              columnNumber: 23
+            }, this))
+          ] }, void 0, true, {
+            fileName: "<stdin>",
+            lineNumber: 190,
+            columnNumber: 19
+          }, this) : creator && creator.username === currentUser?.username && /* @__PURE__ */ jsxDEV("div", { className: "border-t border-gray-700 pt-4", children: /* @__PURE__ */ jsxDEV("div", { className: "mt-4", children: [
+            /* @__PURE__ */ jsxDEV(
+              "textarea",
+              {
+                value: newAnswer[question.id] || "",
+                onChange: (e) => setNewAnswer((prev) => ({ ...prev, [question.id]: e.target.value })),
+                placeholder: "Write your answer...",
+                className: "w-full px-3 py-2 bg-gray-700 rounded-md text-white placeholder-gray-400 resize-none",
+                rows: "3"
+              },
+              void 0,
+              false,
+              {
+                fileName: "<stdin>",
+                lineNumber: 204,
+                columnNumber: 23
+              },
+              this
+            ),
+            /* @__PURE__ */ jsxDEV(
+              "button",
+              {
+                onClick: () => handleAnswer(question.id),
+                className: "mt-2 px-4 py-2 bg-green-600 hover:bg-green-700 rounded-md text-sm font-medium transition duration-200",
+                children: "Post Answer"
+              },
+              void 0,
+              false,
+              {
+                fileName: "<stdin>",
+                lineNumber: 211,
+                columnNumber: 23
+              },
+              this
+            )
+          ] }, void 0, true, {
+            fileName: "<stdin>",
+            lineNumber: 203,
+            columnNumber: 21
+          }, this) }, void 0, false, {
+            fileName: "<stdin>",
+            lineNumber: 202,
+            columnNumber: 19
+          }, this)
+        ] }, question.id, true, {
+          fileName: "<stdin>",
+          lineNumber: 162,
+          columnNumber: 15
+        }, this);
+      }),
+      sortedQuestions.length === 0 && /* @__PURE__ */ jsxDEV("div", { className: "text-center py-12", children: /* @__PURE__ */ jsxDEV("p", { className: "text-gray-400 text-lg", children: "No questions yet. Be the first to ask!" }, void 0, false, {
+        fileName: "<stdin>",
+        lineNumber: 226,
+        columnNumber: 15
+      }, this) }, void 0, false, {
+        fileName: "<stdin>",
+        lineNumber: 225,
+        columnNumber: 13
+      }, this)
+    ] }, void 0, true, {
+      fileName: "<stdin>",
+      lineNumber: 153,
+      columnNumber: 9
+    }, this)
+  ] }, void 0, true, {
+    fileName: "<stdin>",
+    lineNumber: 126,
+    columnNumber: 7
+  }, this) }, void 0, false, {
+    fileName: "<stdin>",
+    lineNumber: 125,
+    columnNumber: 5
+  }, this);
+}
+const root = createRoot(document.getElementById("root"));
+root.render(/* @__PURE__ */ jsxDEV(AMAApp, {}, void 0, false, {
+  fileName: "<stdin>",
+  lineNumber: 236,
+  columnNumber: 13
+}));
