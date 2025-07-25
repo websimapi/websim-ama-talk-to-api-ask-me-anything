@@ -1,0 +1,66 @@
+{
+  "database": {
+    "schema": {
+      "questions": {
+        "id": {
+          "type": "uuid",
+          "description": "The unique identifier for the question"
+        },
+        "question": {
+          "type": "text",
+          "description": "The question text"
+        },
+        "author_username": {
+          "type": "text",
+          "description": "Username of the person asking the question"
+        },
+        "author_id": {
+          "type": "uuid",
+          "description": "User ID of the person asking the question"
+        }
+      },
+      "votes": {
+        "id": {
+          "type": "text",
+          "description": "User ID + Question ID for uniqueness"
+        },
+        "question_id": {
+          "type": "uuid",
+          "description": "The unique identifier for the question"
+        },
+        "user_id": {
+          "type": "uuid",
+          "description": "The unique identifier for the user"
+        },
+        "vote_type": {
+          "type": "text",
+          "description": "Either 'up' or 'down'"
+        }
+      },
+      "answers": {
+        "id": {
+          "type": "uuid",
+          "description": "The unique identifier for the answer"
+        },
+        "question_id": {
+          "type": "uuid",
+          "description": "The unique identifier for the question"
+        },
+        "answer": {
+          "type": "text",
+          "description": "The answer text"
+        },
+        "user_id": {
+          "type": "uuid",
+          "description": "The unique identifier for the creator answering"
+        },
+        "username": {
+          "type": "text",
+          "description": "Username of the creator"
+        }
+      }
+    },
+    "instructions": "This is an AMA (Ask Me Anything) page. Users can ask questions via the interface. Other users can upvote/downvote questions. Only the creator (@api) can answer questions. Votes affect the ranking order based on score (upvotes - downvotes)."
+  }
+}
+
